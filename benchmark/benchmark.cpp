@@ -8,8 +8,8 @@ static inline double randD() {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc != 5) {
-        printf("Usage: %s <N> <D> <no_dims> <random_state>\n", argv[0]);
+    if (argc != 6) {
+        printf("Usage: %s <N> <D> <no_dims> <random_state> <num_threands>\n", argv[0]);
         return 1;
     }
 
@@ -17,6 +17,7 @@ int main(int argc, char *argv[]) {
     int D = atoi(argv[2]);
     int no_dims = atoi(argv[3]);
     int random_state = atoi(argv[4]);
+    int num_threads = atoi(argv[5]);
 
     double *X = (double *)malloc(N * D * sizeof(double));
     if (!X) {
@@ -37,7 +38,6 @@ int main(int argc, char *argv[]) {
 
     double perplexity = 30.0;
     double theta = .5;
-    int num_threads = 1;
     int max_iter = 1000;
     int n_iter_early_exag = 250;
     int init_from_Y = false;
