@@ -8,16 +8,16 @@ static inline double randD() {
 }
 
 int main(int argc, char *argv[]) {
-    if (argc != 6) {
-        printf("Usage: %s <N> <D> <no_dims> <random_state> <num_threands>\n", argv[0]);
+    if (argc != 5) {
+        printf("Usage: %s <N> <D> <no_dims>  <num_threands>\n", argv[0]);
         return 1;
     }
 
     int N = atoi(argv[1]);
     int D = atoi(argv[2]);
     int no_dims = atoi(argv[3]);
-    int random_state = atoi(argv[4]);
-    int num_threads = atoi(argv[5]);
+    int random_state = 0x1337;
+    int num_threads = atoi(argv[4]);
 
     double *X = (double *)malloc(N * D * sizeof(double));
     if (!X) {

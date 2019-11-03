@@ -227,6 +227,20 @@ double TSNE<treeT, dist_fn>::computeGradient(int* inp_row_P, int* inp_col_P, dou
         fprintf(stderr, "Memory allocation failed!\n"); exit(1); 
     }
     
+    #ifdef _OPENMP
+    #pragma omp parallel
+    #pragma omp single
+    #endif
+    for (int n = 0; n < N; n++) {
+        // NoneEdge forces
+        #pragma omp task 
+        {
+            double this_Q = .0;
+            tree->computeNonEdgeForces(n, theta, neg_f + n * no_dims, &this_Q);
+            Q[n] = this_Q;
+        }
+    }
+
 #ifdef _OPENMP
     #pragma omp parallel for reduction(+:P_i_sum,C)
 #endif
@@ -255,11 +269,7 @@ double TSNE<treeT, dist_fn>::computeGradient(int* inp_row_P, int* inp_col_P, dou
                 pos_f[ind1 + d] += D * (Y[ind1 + d] - Y[ind2 + d]);
             }
         }
-        
-        // NoneEdge forces
-        double this_Q = .0;
-        tree->computeNonEdgeForces(n, theta, neg_f + n * no_dims, &this_Q);
-        Q[n] = this_Q;
+    
     }
     
     double sum_Q = 0.;
