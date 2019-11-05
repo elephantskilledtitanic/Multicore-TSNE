@@ -7,6 +7,7 @@ user	0m39.542s
 sys	0m0.014s
 ```
 ### Iteration 1. Adding OpenMP tasks
+added OpenMP tasks in computeGradient function, in a the for loop that calls computeNonEdgeForces
 ```
 [maria.covaliu@dp-wn03 cmake]$ time ./benchmark 1000 500 3 2
 
