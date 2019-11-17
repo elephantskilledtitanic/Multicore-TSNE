@@ -32,6 +32,13 @@ private:
     void zeroMean(double* X, int N, int D);
     void computeGaussianPerplexity(double* X, int N, int D, int** _row_P, int** _col_P, double** _val_P, double perplexity, int K, int verbose);
     double randn();
+    void first_step(double* X, int N, int D, int no_dims, double perplexity, double theta,
+    int n_iter_early_exag, int verbose, int** _row_P, int** _col_P, double** _val_P);
+
+    void second_step(int* row_P, int* col_P, double* val_P, double* X, int N, int D, double* Y,
+            int no_dims, double perplexity, double theta, double eta, int verbose, int max_iter,
+            double* dY, double* gains, double* uY, int stop_lying_iter, double early_exaggeration,
+            int mom_switch_iter, double momentum, double final_momentum, double *final_error);
 };
 
 #endif

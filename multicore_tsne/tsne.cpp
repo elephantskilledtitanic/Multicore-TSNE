@@ -61,18 +61,7 @@ void TSNE<treeT, dist_fn>::run(double* X, int N, int D, double* Y,
 #endif
 #endif
 
-    /* 
-        ======================
-            Step 1
-        ======================
-    */
-
-    if (verbose)
-        fprintf(stderr, "Using no_dims = %d, perplexity = %f, and theta = %f\n", no_dims, perplexity, theta);
-
     // Set learning parameters
-    float total_time = .0;
-    time_t start, end;
     int stop_lying_iter = n_iter_early_exag, mom_switch_iter = n_iter_early_exag;
     double momentum = .5, final_momentum = .8;
     double eta = learning_rate;
@@ -82,51 +71,19 @@ void TSNE<treeT, dist_fn>::run(double* X, int N, int D, double* Y,
     double* uY    = (double*) calloc(N * no_dims , sizeof(double));
     double* gains = (double*) malloc(N * no_dims * sizeof(double));
     if (dY == NULL || uY == NULL || gains == NULL) { fprintf(stderr, "Memory allocation failed!\n"); exit(1); }
+
     for (int i = 0; i < N * no_dims; i++) {
         gains[i] = 1.0;
     }
 
-    // Normalize input data (to prevent numerical problems)
-    if (verbose)
-        fprintf(stderr, "Computing input similarities...\n");
-
-    start = time(0);
-    zeroMean(X, N, D);
-    double max_X = .0;
-    for (int i = 0; i < N * D; i++) {
-        if (X[i] > max_X) max_X = X[i];
-    }
-    for (int i = 0; i < N * D; i++) {
-        X[i] /= max_X;
-    }
-
-    // Compute input similarities
-    int* row_P; int* col_P; double* val_P;
-
-    // Compute asymmetric pairwise input similarities
-    computeGaussianPerplexity(X, N, D, &row_P, &col_P, &val_P, perplexity, (int) (3 * perplexity), verbose);
-
-    // Symmetrize input similarities
-    symmetrizeMatrix(&row_P, &col_P, &val_P, N);
-    double sum_P = .0;
-    for (int i = 0; i < row_P[N]; i++) {
-        sum_P += val_P[i];
-    }
-    for (int i = 0; i < row_P[N]; i++) {
-        val_P[i] /= sum_P;
-    }
-
-    end = time(0);
-    if (verbose)
-        fprintf(stderr, "Done in %4.2f seconds (sparsity = %f)!\nLearning embedding...\n", (float)(end - start) , (double) row_P[N] / ((double) N * (double) N));
-
     /* 
         ======================
-            Step 2
+            Step 1
         ======================
     */
-
-
+   int* row_P; int* col_P; double* val_P;
+   first_step(X, N, D, no_dims, perplexity, theta, n_iter_early_exag, verbose, &row_P, &col_P, &val_P);
+   
     // Lie about the P-values
     for (int i = 0; i < row_P[N]; i++) {
         val_P[i] *= early_exaggeration;
@@ -145,8 +102,86 @@ void TSNE<treeT, dist_fn>::run(double* X, int N, int D, double* Y,
         }
     }
 
-    // Perform main training loop
-    start = time(0);
+    /* 
+        ======================
+            Step 2
+        ======================
+    */
+    second_step(row_P, col_P, val_P, X, N, D, Y, no_dims, perplexity, theta, eta, verbose, max_iter,
+                dY, gains, uY, stop_lying_iter, early_exaggeration, mom_switch_iter, momentum, final_momentum, final_error);
+
+    // Clean up memory
+    free(dY);
+    free(uY);
+    free(gains);
+
+    free(row_P); row_P = NULL;
+    free(col_P); col_P = NULL;
+    free(val_P); val_P = NULL;
+
+}
+template <class treeT, double (*dist_fn)( const DataPoint&, const DataPoint&)>
+void TSNE<treeT, dist_fn>::first_step(double* X, int N, int D, int no_dims, double perplexity, double theta,
+    int n_iter_early_exag, int verbose, int** _row_P, int** _col_P, double** _val_P) {
+    // Allocate the memory we need
+
+    /*
+        row_P -- offsets for `col_P` (i)
+        col_P -- K nearest neighbors indices (j)
+        val_P -- p_{i | j}
+    */
+    int K = (int)(3 * perplexity);
+    *_row_P = (int*)    malloc((N + 1) * sizeof(int));
+    *_col_P = (int*)    calloc(N * K, sizeof(int));
+    *_val_P = (double*) calloc(N * K, sizeof(double));
+    if (*_row_P == NULL || *_col_P == NULL || *_val_P == NULL) { fprintf(stderr, "Memory allocation failed!\n"); exit(1); }
+
+    if (verbose)
+        fprintf(stderr, "Using no_dims = %d, perplexity = %f, and theta = %f\n", no_dims, perplexity, theta);
+
+    // Normalize input data (to prevent numerical problems)
+    if (verbose)
+        fprintf(stderr, "Computing input similarities...\n");
+
+    zeroMean(X, N, D);
+    double max_X = .0;
+    for (int i = 0; i < N * D; i++) {
+        if (X[i] > max_X) max_X = X[i];
+    }
+    for (int i = 0; i < N * D; i++) {
+        X[i] /= max_X;
+    }
+
+    // Compute input similarities
+    
+    // Compute asymmetric pairwise input similarities
+    computeGaussianPerplexity(X, N, D, _row_P, _col_P, _val_P, perplexity, K, verbose);
+
+    // Symmetrize input similarities
+    symmetrizeMatrix(_row_P, _col_P, _val_P, N);
+
+    int* row_P= *_row_P;
+    double* val_P = *_val_P;
+
+    double sum_P = .0;
+    for (int i = 0; i < row_P[N]; i++) {
+        sum_P += val_P[i];
+    }
+    for (int i = 0; i < row_P[N]; i++) {
+        val_P[i] /= sum_P;
+    }
+
+    if (verbose)
+        fprintf(stderr, "Done (sparsity = %f)!\nLearning embedding...\n", (double) row_P[N] / ((double) N * (double) N));
+}
+
+template <class treeT, double (*dist_fn)( const DataPoint&, const DataPoint&)>
+void TSNE<treeT, dist_fn>::second_step(int* row_P, int* col_P, double* val_P, double* X, int N, int D, double* Y,
+            int no_dims, double perplexity, double theta, double eta, int verbose, int max_iter,
+            double* dY, double* gains, double* uY, int stop_lying_iter, double early_exaggeration,
+            int mom_switch_iter, double momentum, double final_momentum, double *final_error) {
+
+    // Perform main training looP
     for (int iter = 0; iter < max_iter; iter++) {
 
         bool need_eval_error = (verbose && ((iter > 0 && iter % 50 == 0) || (iter == max_iter - 1)));
@@ -178,34 +213,18 @@ void TSNE<treeT, dist_fn>::run(double* X, int N, int D, double* Y,
 
         // Print out progress
         if (need_eval_error) {
-            end = time(0);
 
             if (iter == 0)
                 fprintf(stderr, "Iteration %d: error is %f\n", iter + 1, error);
             else {
-                total_time += (float) (end - start);
-                fprintf(stderr, "Iteration %d: error is %f (50 iterations in %4.2f seconds)\n", iter + 1, error, (float) (end - start) );
+                fprintf(stderr, "Iteration %d: error is %f \n", iter + 1, error);
             }
-            start = time(0);
         }
-
     }
-    end = time(0); total_time += (float) (end - start) ;
 
     if (final_error != NULL)
         *final_error = evaluateError(row_P, col_P, val_P, Y, N, no_dims, theta);
 
-    // Clean up memory
-    free(dY);
-    free(uY);
-    free(gains);
-
-    free(row_P); row_P = NULL;
-    free(col_P); col_P = NULL;
-    free(val_P); val_P = NULL;
-
-    if (verbose)
-        fprintf(stderr, "Fitting performed in %4.2f seconds.\n", total_time);
 }
 
 // Compute gradient of the t-SNE cost function (using Barnes-Hut algorithm)
@@ -223,53 +242,52 @@ double TSNE<treeT, dist_fn>::computeGradient(int* inp_row_P, int* inp_col_P, dou
     double P_i_sum = 0.;
     double C = 0.;
 
-    if (pos_f == NULL || neg_f == NULL) { 
+    if (pos_f == NULL || neg_f == NULL) {
         fprintf(stderr, "Memory allocation failed!\n"); exit(1); 
     }
     
-    #ifdef _OPENMP
     #pragma omp parallel
-    #pragma omp single
-    #endif
-    for (int n = 0; n < N; n++) {
-        // NoneEdge forces
-        #pragma omp task 
+    {
+        #pragma omp single 
         {
-            double this_Q = .0;
-            tree->computeNonEdgeForces(n, theta, neg_f + n * no_dims, &this_Q);
-            Q[n] = this_Q;
-        }
-    }
-
-#ifdef _OPENMP
-    #pragma omp parallel for reduction(+:P_i_sum,C)
-#endif
-    for (int n = 0; n < N; n++) {
-        // Edge forces
-        int ind1 = n * no_dims;
-        for (int i = inp_row_P[n]; i < inp_row_P[n + 1]; i++) {
-
-            // Compute pairwise distance and Q-value
-            double D = .0;
-            int ind2 = inp_col_P[i] * no_dims;
-            for (int d = 0; d < no_dims; d++) {
-                double t = Y[ind1 + d] - Y[ind2 + d];
-                D += t * t;
-            }
-            
-            // Sometimes we want to compute error on the go
-            if (eval_error) {
-                P_i_sum += inp_val_P[i];
-                C += inp_val_P[i] * log((inp_val_P[i] + FLT_MIN) / ((1.0 / (1.0 + D)) + FLT_MIN));
-            }
-
-            D = inp_val_P[i] / (1.0 + D);
-            // Sum positive force
-            for (int d = 0; d < no_dims; d++) {
-                pos_f[ind1 + d] += D * (Y[ind1 + d] - Y[ind2 + d]);
+            for (int n = 0; n < N; n++) {
+                // NoneEdge forces
+                #pragma omp task firstprivate(n)
+                {
+                    double this_Q = .0;
+                    tree->computeNonEdgeForces(n, theta, neg_f + n * no_dims, &this_Q);
+                    Q[n] = this_Q;
+                }
             }
         }
-    
+
+        #pragma omp for reduction(+:P_i_sum,C)
+        for (int n = 0; n < N; n++) {
+            // Edge forces
+            int ind1 = n * no_dims;
+            for (int i = inp_row_P[n]; i < inp_row_P[n + 1]; i++) {
+
+                // Compute pairwise distance and Q-value
+                double D = .0;
+                int ind2 = inp_col_P[i] * no_dims;
+                for (int d = 0; d < no_dims; d++) {
+                    double t = Y[ind1 + d] - Y[ind2 + d];
+                    D += t * t;
+                }
+                
+                // Sometimes we want to compute error on the go
+                if (eval_error) {
+                    P_i_sum += inp_val_P[i];
+                    C += inp_val_P[i] * log((inp_val_P[i] + FLT_MIN) / ((1.0 / (1.0 + D)) + FLT_MIN));
+                }
+
+                D = inp_val_P[i] / (1.0 + D);
+                // Sum positive force
+                for (int d = 0; d < no_dims; d++) {
+                    pos_f[ind1 + d] += D * (Y[ind1 + d] - Y[ind2 + d]);
+                }
+            }
+        }
     }
     
     double sum_Q = 0.;
@@ -282,14 +300,14 @@ double TSNE<treeT, dist_fn>::computeGradient(int* inp_row_P, int* inp_col_P, dou
         dC[i] = pos_f[i] - (neg_f[i] / sum_Q);
     }
 
-    delete tree;
-    delete[] pos_f;
-    delete[] neg_f;
-    delete[] Q;
+delete tree;
+delete[] pos_f;
+delete[] neg_f;
+delete[] Q;
 
-    C += P_i_sum * log(sum_Q);
+C += P_i_sum * log(sum_Q);
 
-    return C;
+return C;
 }
 
 
@@ -336,18 +354,6 @@ template <class treeT, double (*dist_fn)( const DataPoint&, const DataPoint&)>
 void TSNE<treeT, dist_fn>::computeGaussianPerplexity(double* X, int N, int D, int** _row_P, int** _col_P, double** _val_P, double perplexity, int K, int verbose) {
 
     if (perplexity > K) fprintf(stderr, "Perplexity should be lower than K!\n");
-
-    // Allocate the memory we need
-    *_row_P = (int*)    malloc((N + 1) * sizeof(int));
-    *_col_P = (int*)    calloc(N * K, sizeof(int));
-    *_val_P = (double*) calloc(N * K, sizeof(double));
-    if (*_row_P == NULL || *_col_P == NULL || *_val_P == NULL) { fprintf(stderr, "Memory allocation failed!\n"); exit(1); }
-
-    /*
-        row_P -- offsets for `col_P` (i)
-        col_P -- K nearest neighbors indices (j)
-        val_P -- p_{i | j}
-    */
 
     int* row_P = *_row_P;
     int* col_P = *_col_P;
