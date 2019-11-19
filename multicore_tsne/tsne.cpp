@@ -261,7 +261,7 @@ double TSNE<treeT, dist_fn>::computeGradient(int* inp_row_P, int* inp_col_P, dou
             }
         }
 
-        // #pragma omp for reduction(+:P_i_sum,C)
+        #pragma omp for reduction(+:P_i_sum,C)
         for (int n = 0; n < N; n++) {
             // Edge forces
             int ind1 = n * no_dims;
@@ -330,7 +330,7 @@ double TSNE<treeT, dist_fn>::evaluateError(int* row_P, int* col_P, double* val_P
     // Loop over all edges to compute t-SNE error
     double C = .0;
 #ifdef _OPENMP
-    // #pragma omp parallel for reduction(+:C)
+    #pragma omp parallel for reduction(+:C)
 #endif
     for (int n = 0; n < N; n++) {
         int ind1 = n * no_dims;
@@ -378,7 +378,7 @@ void TSNE<treeT, dist_fn>::computeGaussianPerplexity(double* X, int N, int D, in
 
     int steps_completed = 0;
 #ifdef _OPENMP
-    #pragma omp parallel for
+    // #pragma omp parallel for
 #endif
     for (int n = 0; n < N; n++)
     {
@@ -453,14 +453,14 @@ void TSNE<treeT, dist_fn>::computeGaussianPerplexity(double* X, int N, int D, in
 
         // Print progress
 #ifdef _OPENMP
-        #pragma omp atomic
+        // #pragma omp atomic
 #endif
         ++steps_completed;
 
         if (verbose && steps_completed % (N / 10) == 0)
         {
 #ifdef _OPENMP
-            #pragma omp critical
+            // #pragma omp critical
 #endif
             fprintf(stderr, " - point %d of %d\n", steps_completed, N);
         }
