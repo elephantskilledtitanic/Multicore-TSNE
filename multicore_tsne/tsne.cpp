@@ -54,13 +54,6 @@ void TSNE<treeT, dist_fn>::run(double* X, int N, int D, double* Y,
             fprintf(stderr, "Perplexity too large for the number of data points! Adjusting ...\n");
     }
 
-#ifdef _OPENMP
-    omp_set_num_threads(NUM_THREADS(num_threads));
-#if _OPENMP >= 200805
-    omp_set_schedule(omp_sched_guided, 0);
-#endif
-#endif
-
     // Set learning parameters
     int stop_lying_iter = n_iter_early_exag, mom_switch_iter = n_iter_early_exag;
     double momentum = .5, final_momentum = .8;
@@ -246,24 +239,14 @@ double TSNE<treeT, dist_fn>::computeGradient(int* inp_row_P, int* inp_col_P, dou
         fprintf(stderr, "Memory allocation failed!\n"); exit(1); 
     }
     
-    #pragma omp parallel
-    {
-        #pragma omp single 
+    for (int n = 0; n < N; n++) {
+        // NoneEdge forces
+        #pragma omp task firstprivate(n)
         {
-            for (int n = 0; n < N; n++) {
-                // NoneEdge forces
-                #pragma omp task firstprivate(n)
-                {
-                    double this_Q = .0;
-                    tree->computeNonEdgeForces(n, theta, neg_f + n * no_dims, &this_Q);
-                    Q[n] = this_Q;
-                }
-            }
-        }
+            double this_Q = .0;
+            tree->computeNonEdgeForces(n, theta, neg_f + n * no_dims, &this_Q);
+            Q[n] = this_Q;
 
-        #pragma omp for reduction(+:P_i_sum,C)
-        for (int n = 0; n < N; n++) {
-            // Edge forces
             int ind1 = n * no_dims;
             for (int i = inp_row_P[n]; i < inp_row_P[n + 1]; i++) {
 
@@ -277,8 +260,11 @@ double TSNE<treeT, dist_fn>::computeGradient(int* inp_row_P, int* inp_col_P, dou
                 
                 // Sometimes we want to compute error on the go
                 if (eval_error) {
-                    P_i_sum += inp_val_P[i];
-                    C += inp_val_P[i] * log((inp_val_P[i] + FLT_MIN) / ((1.0 / (1.0 + D)) + FLT_MIN));
+                    #pragma omp critical
+                    {
+                        P_i_sum += inp_val_P[i];
+                        C += inp_val_P[i] * log((inp_val_P[i] + FLT_MIN) / ((1.0 / (1.0 + D)) + FLT_MIN));
+                    }
                 }
 
                 D = inp_val_P[i] / (1.0 + D);
@@ -290,6 +276,8 @@ double TSNE<treeT, dist_fn>::computeGradient(int* inp_row_P, int* inp_col_P, dou
         }
     }
     
+    #pragma omp taskwait
+    
     double sum_Q = 0.;
     for (int i = 0; i < N; i++) {
         sum_Q += Q[i];
@@ -300,14 +288,14 @@ double TSNE<treeT, dist_fn>::computeGradient(int* inp_row_P, int* inp_col_P, dou
         dC[i] = pos_f[i] - (neg_f[i] / sum_Q);
     }
 
-delete tree;
-delete[] pos_f;
-delete[] neg_f;
-delete[] Q;
+    delete tree;
+    delete[] pos_f;
+    delete[] neg_f;
+    delete[] Q;
 
-C += P_i_sum * log(sum_Q);
+    C += P_i_sum * log(sum_Q);
 
-return C;
+    return C;
 }
 
 
@@ -329,22 +317,28 @@ double TSNE<treeT, dist_fn>::evaluateError(int* row_P, int* col_P, double* val_P
     
     // Loop over all edges to compute t-SNE error
     double C = .0;
-#ifdef _OPENMP
-    #pragma omp parallel for reduction(+:C)
-#endif
     for (int n = 0; n < N; n++) {
-        int ind1 = n * no_dims;
-        for (int i = row_P[n]; i < row_P[n + 1]; i++) {
-            double Q = .0;
-            int ind2 = col_P[i] * no_dims;
-            for (int d = 0; d < no_dims; d++) {
-                double b  = Y[ind1 + d] - Y[ind2 + d];
-                Q += b * b;
+        #pragma omp task firstprivate(n)
+        {
+            double C_task = .0;
+            int ind1 = n * no_dims;
+            for (int i = row_P[n]; i < row_P[n + 1]; i++) {
+                double Q = .0;
+                int ind2 = col_P[i] * no_dims;
+                for (int d = 0; d < no_dims; d++) {
+                    double b  = Y[ind1 + d] - Y[ind2 + d];
+                    Q += b * b;
+                }
+                Q = (1.0 / (1.0 + Q)) / sum_Q;
+                C_task += val_P[i] * log((val_P[i] + FLT_MIN) / (Q + FLT_MIN));
+                
             }
-            Q = (1.0 / (1.0 + Q)) / sum_Q;
-            C += val_P[i] * log((val_P[i] + FLT_MIN) / (Q + FLT_MIN));
+            #pragma omp critical
+                C += C_task;
         }
     }
+
+    #pragma omp taskwait
     
     return C;
 }
@@ -377,94 +371,96 @@ void TSNE<treeT, dist_fn>::computeGaussianPerplexity(double* X, int N, int D, in
         fprintf(stderr, "Building tree...\n");
 
     int steps_completed = 0;
-#ifdef _OPENMP
-    #pragma omp parallel for
-#endif
     for (int n = 0; n < N; n++)
     {
-        std::vector<double> cur_P(K);
-        std::vector<DataPoint> indices;
-        std::vector<double> distances;
+        #pragma omp task firstprivate(n)
+        {
+            std::vector<double> cur_P(K);
+            std::vector<DataPoint> indices;
+            std::vector<double> distances;
 
-        // Find nearest neighbors
-        tree->search(obj_X[n], K + 1, &indices, &distances);
+            // Find nearest neighbors
+            tree->search(obj_X[n], K + 1, &indices, &distances);
 
-        // Initialize some variables for binary search
-        bool found = false;
-        double beta = 1.0;
-        double min_beta = -DBL_MAX;
-        double max_beta =  DBL_MAX;
-        double tol = 1e-5;
+            // Initialize some variables for binary search
+            bool found = false;
+            double beta = 1.0;
+            double min_beta = -DBL_MAX;
+            double max_beta =  DBL_MAX;
+            double tol = 1e-5;
 
-        // Iterate until we found a good perplexity
-        int iter = 0; double sum_P;
-        while (!found && iter < 200) {
+            // Iterate until we found a good perplexity
+            int iter = 0; double sum_P;
+            while (!found && iter < 200) {
 
-            // Compute Gaussian kernel row
-            for (int m = 0; m < K; m++) {
-                cur_P[m] = exp(-beta * distances[m + 1]);
-            }
+                // Compute Gaussian kernel row
+                for (int m = 0; m < K; m++) {
+                    cur_P[m] = exp(-beta * distances[m + 1]);
+                }
 
-            // Compute entropy of current row
-            sum_P = DBL_MIN;
-            for (int m = 0; m < K; m++) {
-                sum_P += cur_P[m];
-            }
-            double H = .0;
-            for (int m = 0; m < K; m++) {
-                H += beta * (distances[m + 1] * cur_P[m]);
-            }
-            H = (H / sum_P) + log(sum_P);
+                // Compute entropy of current row
+                sum_P = DBL_MIN;
+                for (int m = 0; m < K; m++) {
+                    sum_P += cur_P[m];
+                }
+                double H = .0;
+                for (int m = 0; m < K; m++) {
+                    H += beta * (distances[m + 1] * cur_P[m]);
+                }
+                H = (H / sum_P) + log(sum_P);
 
-            // Evaluate whether the entropy is within the tolerance level
-            double Hdiff = H - log(perplexity);
-            if (Hdiff < tol && -Hdiff < tol) {
-                found = true;
-            }
-            else {
-                if (Hdiff > 0) {
-                    min_beta = beta;
-                    if (max_beta == DBL_MAX || max_beta == -DBL_MAX)
-                        beta *= 2.0;
-                    else
-                        beta = (beta + max_beta) / 2.0;
+                // Evaluate whether the entropy is within the tolerance level
+                double Hdiff = H - log(perplexity);
+                if (Hdiff < tol && -Hdiff < tol) {
+                    found = true;
                 }
                 else {
-                    max_beta = beta;
-                    if (min_beta == -DBL_MAX || min_beta == DBL_MAX)
-                        beta /= 2.0;
-                    else
-                        beta = (beta + min_beta) / 2.0;
+                    if (Hdiff > 0) {
+                        min_beta = beta;
+                        if (max_beta == DBL_MAX || max_beta == -DBL_MAX)
+                            beta *= 2.0;
+                        else
+                            beta = (beta + max_beta) / 2.0;
+                    }
+                    else {
+                        max_beta = beta;
+                        if (min_beta == -DBL_MAX || min_beta == DBL_MAX)
+                            beta /= 2.0;
+                        else
+                            beta = (beta + min_beta) / 2.0;
+                    }
                 }
+
+                // Update iteration counter
+                iter++;
             }
 
-            // Update iteration counter
-            iter++;
-        }
+            // Row-normalize current row of P and store in matrix
+            for (int m = 0; m < K; m++) {
+                cur_P[m] /= sum_P;
+            }
+            for (int m = 0; m < K; m++) {
+                col_P[row_P[n] + m] = indices[m + 1].index();
+                val_P[row_P[n] + m] = cur_P[m];
+            }
 
-        // Row-normalize current row of P and store in matrix
-        for (int m = 0; m < K; m++) {
-            cur_P[m] /= sum_P;
-        }
-        for (int m = 0; m < K; m++) {
-            col_P[row_P[n] + m] = indices[m + 1].index();
-            val_P[row_P[n] + m] = cur_P[m];
-        }
+            // Print progress
+    #ifdef _OPENMP
+            #pragma omp atomic
+    #endif
+            ++steps_completed;
 
-        // Print progress
-#ifdef _OPENMP
-        #pragma omp atomic
-#endif
-        ++steps_completed;
-
-        if (verbose && steps_completed % (N / 10) == 0)
-        {
-#ifdef _OPENMP
-            #pragma omp critical
-#endif
-            fprintf(stderr, " - point %d of %d\n", steps_completed, N);
+            if (verbose && steps_completed % (N / 10) == 0)
+            {
+    #ifdef _OPENMP
+                #pragma omp critical
+    #endif
+                fprintf(stderr, " - point %d of %d\n", steps_completed, N);
+            }
         }
     }
+
+    #pragma omp taskwait
 
     // Clean up memory
     obj_X.clear();
@@ -622,17 +618,30 @@ extern "C"
                                 double early_exaggeration = 12, double learning_rate = 200,
                                 double *final_error = NULL, int distance = 1)
     {
+        #ifdef _OPENMP
+            omp_set_num_threads(NUM_THREADS(num_threads));
+        #if _OPENMP >= 200805
+            omp_set_schedule(omp_sched_guided, 0);
+        #endif
+        #endif
+
         if (verbose)
             fprintf(stderr, "Performing t-SNE using %d cores.\n", NUM_THREADS(num_threads));
-        if (distance == 0) {
-            TSNE<SplitTree, euclidean_distance> tsne;
-            tsne.run(X, N, D, Y, no_dims, perplexity, theta, num_threads, max_iter, n_iter_early_exag,
-                     random_state, init_from_Y, verbose, early_exaggeration, learning_rate, final_error);
-        }
-        else {
-            TSNE<SplitTree, euclidean_distance_squared> tsne;
-            tsne.run(X, N, D, Y, no_dims, perplexity, theta, num_threads, max_iter, n_iter_early_exag,
-                     random_state, init_from_Y, verbose, early_exaggeration, learning_rate, final_error);
+        #pragma omp parallel
+        {
+            #pragma omp single
+            {
+                if (distance == 0) {
+                    TSNE<SplitTree, euclidean_distance> tsne;
+                    tsne.run(X, N, D, Y, no_dims, perplexity, theta, num_threads, max_iter, n_iter_early_exag,
+                            random_state, init_from_Y, verbose, early_exaggeration, learning_rate, final_error);
+                }
+                else {
+                    TSNE<SplitTree, euclidean_distance_squared> tsne;
+                    tsne.run(X, N, D, Y, no_dims, perplexity, theta, num_threads, max_iter, n_iter_early_exag,
+                            random_state, init_from_Y, verbose, early_exaggeration, learning_rate, final_error);
+                }
+            }
         }
     }
 }
