@@ -373,94 +373,83 @@ void TSNE<treeT, dist_fn>::computeGaussianPerplexity(double* X, int N, int D, in
     int steps_completed = 0;
     for (int n = 0; n < N; n++)
     {
-        // #pragma omp task firstprivate(n)
-        {
-            std::vector<double> cur_P(K);
-            std::vector<DataPoint> indices;
-            std::vector<double> distances;
+        std::vector<double> cur_P(K);
+        std::vector<DataPoint> indices;
+        std::vector<double> distances;
 
-            // Find nearest neighbors
-            tree->search(obj_X[n], K + 1, &indices, &distances);
+        // Find nearest neighbors
+        tree->search(obj_X[n], K + 1, &indices, &distances);
 
-            // Initialize some variables for binary search
-            bool found = false;
-            double beta = 1.0;
-            double min_beta = -DBL_MAX;
-            double max_beta =  DBL_MAX;
-            double tol = 1e-5;
+        // Initialize some variables for binary search
+        bool found = false;
+        double beta = 1.0;
+        double min_beta = -DBL_MAX;
+        double max_beta =  DBL_MAX;
+        double tol = 1e-5;
 
-            // Iterate until we found a good perplexity
-            int iter = 0; double sum_P;
-            while (!found && iter < 200) {
+        // Iterate until we found a good perplexity
+        int iter = 0; double sum_P;
+        while (!found && iter < 200) {
 
-                // Compute Gaussian kernel row
-                for (int m = 0; m < K; m++) {
-                    cur_P[m] = exp(-beta * distances[m + 1]);
-                }
+            // Compute Gaussian kernel row
+            for (int m = 0; m < K; m++) {
+                cur_P[m] = exp(-beta * distances[m + 1]);
+            }
 
-                // Compute entropy of current row
-                sum_P = DBL_MIN;
-                for (int m = 0; m < K; m++) {
-                    sum_P += cur_P[m];
-                }
-                double H = .0;
-                for (int m = 0; m < K; m++) {
-                    H += beta * (distances[m + 1] * cur_P[m]);
-                }
-                H = (H / sum_P) + log(sum_P);
+            // Compute entropy of current row
+            sum_P = DBL_MIN;
+            for (int m = 0; m < K; m++) {
+                sum_P += cur_P[m];
+            }
+            double H = .0;
+            for (int m = 0; m < K; m++) {
+                H += beta * (distances[m + 1] * cur_P[m]);
+            }
+            H = (H / sum_P) + log(sum_P);
 
-                // Evaluate whether the entropy is within the tolerance level
-                double Hdiff = H - log(perplexity);
-                if (Hdiff < tol && -Hdiff < tol) {
-                    found = true;
+            // Evaluate whether the entropy is within the tolerance level
+            double Hdiff = H - log(perplexity);
+            if (Hdiff < tol && -Hdiff < tol) {
+                found = true;
+            }
+            else {
+                if (Hdiff > 0) {
+                    min_beta = beta;
+                    if (max_beta == DBL_MAX || max_beta == -DBL_MAX)
+                        beta *= 2.0;
+                    else
+                        beta = (beta + max_beta) / 2.0;
                 }
                 else {
-                    if (Hdiff > 0) {
-                        min_beta = beta;
-                        if (max_beta == DBL_MAX || max_beta == -DBL_MAX)
-                            beta *= 2.0;
-                        else
-                            beta = (beta + max_beta) / 2.0;
-                    }
-                    else {
-                        max_beta = beta;
-                        if (min_beta == -DBL_MAX || min_beta == DBL_MAX)
-                            beta /= 2.0;
-                        else
-                            beta = (beta + min_beta) / 2.0;
-                    }
+                    max_beta = beta;
+                    if (min_beta == -DBL_MAX || min_beta == DBL_MAX)
+                        beta /= 2.0;
+                    else
+                        beta = (beta + min_beta) / 2.0;
                 }
-
-                // Update iteration counter
-                iter++;
             }
 
-            // Row-normalize current row of P and store in matrix
-            for (int m = 0; m < K; m++) {
-                cur_P[m] /= sum_P;
-            }
-            for (int m = 0; m < K; m++) {
-                col_P[row_P[n] + m] = indices[m + 1].index();
-                val_P[row_P[n] + m] = cur_P[m];
-            }
+            // Update iteration counter
+            iter++;
+        }
 
-            // Print progress
-    #ifdef _OPENMP
-            // #pragma omp atomic
-    #endif
-            ++steps_completed;
+        // Row-normalize current row of P and store in matrix
+        for (int m = 0; m < K; m++) {
+            cur_P[m] /= sum_P;
+        }
+        for (int m = 0; m < K; m++) {
+            col_P[row_P[n] + m] = indices[m + 1].index();
+            val_P[row_P[n] + m] = cur_P[m];
+        }
 
-            if (verbose && steps_completed % (N / 10) == 0)
-            {
-    #ifdef _OPENMP
-                // #pragma omp critical
-    #endif
-                fprintf(stderr, " - point %d of %d\n", steps_completed, N);
-            }
+        // Print progress
+        ++steps_completed;
+
+        if (verbose && steps_completed % (N / 10) == 0)
+        {
+            fprintf(stderr, " - point %d of %d\n", steps_completed, N);
         }
     }
-
-    // #pragma omp taskwait
 
     // Clean up memory
     obj_X.clear();
