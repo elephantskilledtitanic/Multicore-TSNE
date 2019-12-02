@@ -189,15 +189,15 @@ private:
 
             // Recursively build tree
             node->index = lower;
-            #pragma omp task 
+            // #pragma omp task 
             {
             node->left = buildFromPoints(lower + 1, median);
             }
-            #pragma omp task
+            // #pragma omp task
             {
             node->right = buildFromPoints(median, upper);
             }
-            #pragma omp taskwait
+            // #pragma omp taskwait
         }
 
         // Return result
