@@ -373,7 +373,7 @@ void TSNE<treeT, dist_fn>::computeGaussianPerplexity(double* X, int N, int D, in
     int steps_completed = 0;
     for (int n = 0; n < N; n++)
     {
-        // #pragma omp task firstprivate(n)
+        #pragma omp task firstprivate(n)
         {
             std::vector<double> cur_P(K);
             std::vector<DataPoint> indices;
@@ -446,21 +446,21 @@ void TSNE<treeT, dist_fn>::computeGaussianPerplexity(double* X, int N, int D, in
 
             // Print progress
     #ifdef _OPENMP
-            // #pragma omp atomic
+            #pragma omp atomic
     #endif
             ++steps_completed;
 
             if (verbose && steps_completed % (N / 10) == 0)
             {
     #ifdef _OPENMP
-                // #pragma omp critical
+                #pragma omp critical
     #endif
                 fprintf(stderr, " - point %d of %d\n", steps_completed, N);
             }
         }
     }
 
-    // #pragma omp taskwait
+    #pragma omp taskwait
 
     // Clean up memory
     obj_X.clear();
