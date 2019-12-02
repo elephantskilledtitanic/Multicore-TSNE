@@ -318,8 +318,8 @@ double TSNE<treeT, dist_fn>::evaluateError(int* row_P, int* col_P, double* val_P
     // Loop over all edges to compute t-SNE error
     double C = .0;
     for (int n = 0; n < N; n++) {
-        #pragma omp task firstprivate(n)
-        {
+        // #pragma omp task firstprivate(n)
+        // {
             double C_task = .0;
             int ind1 = n * no_dims;
             for (int i = row_P[n]; i < row_P[n + 1]; i++) {
@@ -333,12 +333,12 @@ double TSNE<treeT, dist_fn>::evaluateError(int* row_P, int* col_P, double* val_P
                 C_task += val_P[i] * log((val_P[i] + FLT_MIN) / (Q + FLT_MIN));
                 
             }
-            #pragma omp critical
+            // #pragma omp critical
                 C += C_task;
-        }
+        // }
     }
 
-    #pragma omp taskwait
+    // #pragma omp taskwait
     
     return C;
 }
@@ -373,7 +373,7 @@ void TSNE<treeT, dist_fn>::computeGaussianPerplexity(double* X, int N, int D, in
     int steps_completed = 0;
     for (int n = 0; n < N; n++)
     {
-        #pragma omp task firstprivate(n)
+        // #pragma omp task firstprivate(n)
         {
             std::vector<double> cur_P(K);
             std::vector<DataPoint> indices;
@@ -446,21 +446,21 @@ void TSNE<treeT, dist_fn>::computeGaussianPerplexity(double* X, int N, int D, in
 
             // Print progress
     #ifdef _OPENMP
-            #pragma omp atomic
+            // #pragma omp atomic
     #endif
             ++steps_completed;
 
             if (verbose && steps_completed % (N / 10) == 0)
             {
     #ifdef _OPENMP
-                #pragma omp critical
+                // #pragma omp critical
     #endif
                 fprintf(stderr, " - point %d of %d\n", steps_completed, N);
             }
         }
     }
 
-    #pragma omp taskwait
+    // #pragma omp taskwait
 
     // Clean up memory
     obj_X.clear();
