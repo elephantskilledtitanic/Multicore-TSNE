@@ -16,21 +16,12 @@
 #include <ctime>
 #include <iostream>
 
-#ifdef _OPENMP
-#include <omp.h>
-#endif
 
 // #include "quadtree.h"
 #include "splittree.h"
 #include "vptree.h"
 #include "tsne.h"
 
-
-#ifdef _OPENMP
-    #define NUM_THREADS(N) ((N) >= 0 ? (N) : omp_get_num_procs() + (N) + 1)
-#else
-    #define NUM_THREADS(N) (1)
-#endif
 
 
 /*  
@@ -241,7 +232,6 @@ double TSNE<treeT, dist_fn>::computeGradient(int* inp_row_P, int* inp_col_P, dou
     
     for (int n = 0; n < N; n++) {
         // NoneEdge forces
-        #pragma omp task firstprivate(n)
         {
             double this_Q = .0;
             tree->computeNonEdgeForces(n, theta, neg_f + n * no_dims, &this_Q);
@@ -260,11 +250,9 @@ double TSNE<treeT, dist_fn>::computeGradient(int* inp_row_P, int* inp_col_P, dou
                 
                 // Sometimes we want to compute error on the go
                 if (eval_error) {
-                    #pragma omp critical
-                    {
-                        P_i_sum += inp_val_P[i];
-                        C += inp_val_P[i] * log((inp_val_P[i] + FLT_MIN) / ((1.0 / (1.0 + D)) + FLT_MIN));
-                    }
+                    P_i_sum += inp_val_P[i];
+                    C += inp_val_P[i] * log((inp_val_P[i] + FLT_MIN) / ((1.0 / (1.0 + D)) + FLT_MIN));
+
                 }
 
                 D = inp_val_P[i] / (1.0 + D);
@@ -276,7 +264,6 @@ double TSNE<treeT, dist_fn>::computeGradient(int* inp_row_P, int* inp_col_P, dou
         }
     }
     
-    #pragma omp taskwait
     
     double sum_Q = 0.;
     for (int i = 0; i < N; i++) {
@@ -331,10 +318,9 @@ double TSNE<treeT, dist_fn>::evaluateError(int* row_P, int* col_P, double* val_P
             C_task += val_P[i] * log((val_P[i] + FLT_MIN) / (Q + FLT_MIN));
             
         }
-        C += C_task;
-
+            C += C_task;
     }
-
+    
     return C;
 }
 
@@ -603,30 +589,21 @@ extern "C"
                                 double early_exaggeration = 12, double learning_rate = 200,
                                 double *final_error = NULL, int distance = 1)
     {
-        #ifdef _OPENMP
-            omp_set_num_threads(NUM_THREADS(num_threads));
-        #if _OPENMP >= 200805
-            omp_set_schedule(omp_sched_guided, 0);
-        #endif
-        #endif
+
 
         if (verbose)
-            fprintf(stderr, "Performing t-SNE using %d cores.\n", NUM_THREADS(num_threads));
-        #pragma omp parallel
-        {
-            #pragma omp single
-            {
-                if (distance == 0) {
-                    TSNE<SplitTree, euclidean_distance> tsne;
-                    tsne.run(X, N, D, Y, no_dims, perplexity, theta, num_threads, max_iter, n_iter_early_exag,
-                            random_state, init_from_Y, verbose, early_exaggeration, learning_rate, final_error);
-                }
-                else {
-                    TSNE<SplitTree, euclidean_distance_squared> tsne;
-                    tsne.run(X, N, D, Y, no_dims, perplexity, theta, num_threads, max_iter, n_iter_early_exag,
-                            random_state, init_from_Y, verbose, early_exaggeration, learning_rate, final_error);
-                }
+        {   
+            if (distance == 0) {
+                TSNE<SplitTree, euclidean_distance> tsne;
+                tsne.run(X, N, D, Y, no_dims, perplexity, theta, num_threads, max_iter, n_iter_early_exag,
+                        random_state, init_from_Y, verbose, early_exaggeration, learning_rate, final_error);
             }
+            else {
+                TSNE<SplitTree, euclidean_distance_squared> tsne;
+                tsne.run(X, N, D, Y, no_dims, perplexity, theta, num_threads, max_iter, n_iter_early_exag,
+                        random_state, init_from_Y, verbose, early_exaggeration, learning_rate, final_error);
+            }
+            
         }
     }
 }
