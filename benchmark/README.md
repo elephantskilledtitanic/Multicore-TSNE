@@ -2,8 +2,8 @@
 ## Common case 
 ```
 common case 1000 1000 3 1  --> 27.57s
-multiple points 100 5000 3 1 --> 12.53s
-multiple dimensions 10 50000 3 1 --> 9.11s
+multiple points 1000 10 3 1 --> 12.53s
+multiple dimensions 100 50000 3 1 --> 9.11s
 ```
 ### Iteration 1. Adding OpenMP tasks
 added OpenMP tasks in computeGradient function, in a the for loop that calls computeNonEdgeForces
