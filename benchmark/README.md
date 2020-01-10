@@ -1,10 +1,9 @@
 ### Serial implementation
+## Common case 
 ```
-[maria.covaliu@dp-wn03 cmake]$ time ./benchmark 1000 500 3 1
-
-real	0m39.567s
-user	0m39.542s
-sys	0m0.014s
+common case 1000 1000 3 1  --> 27.57s
+multiple points 100 5000 3 1 --> 12.53s
+multiple dimensions 10 50000 3 1 --> 9.11s
 ```
 ### Iteration 1. Adding OpenMP tasks
 added OpenMP tasks in computeGradient function, in a the for loop that calls computeNonEdgeForces
